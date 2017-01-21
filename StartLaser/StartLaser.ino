@@ -6,6 +6,7 @@ Adafruit_SI1145 uv = Adafruit_SI1145();
 
 int UVLight = 0;
 int visLight = 0;
+//  THESE ARE THE THRESHOLD VALUES; IF NEEDED, CHANGE TO SUIT WEATHER
 const int normalIR = 5000;
 const int normalUV = 18;
 
@@ -85,7 +86,8 @@ void loop() {
 
 // Main Functions
   startLaser(raceState);
-
+  
+// For Debugging Threshold Values
 //  Serial.println(uv.readUV());
 }
 
@@ -101,7 +103,7 @@ void startLaser(State s) {
 //  after the laser is armed...
     case RaceStart:
 //    ..if the laser is tripped...
-      if (/* uv.readUV() < normalUV */ Serial.available() > 0) {
+      if (uv.readUV() < normalUV) {
 //      ...send "start tripped" message
         Serial.println("Start Laser was tripped!");
 //      ...record the Start Time
@@ -133,7 +135,7 @@ void startLaser(State s) {
       }
     
 //    ...when the End Signal is recieved...
-      if (/* digitalRead(EndRaceSignal) == HIGH */ uv.readUV() < normalUV) {
+      if (digitalRead(EndRaceSignal) == HIGH) {
 //      ...send "end tripped" message
         Serial.println("End Laser was tripped!");
 //      ...record the End Time
