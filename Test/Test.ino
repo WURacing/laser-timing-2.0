@@ -1,3 +1,5 @@
+// This file is for testing to see if the UV sensors are working
+
 #include <Wire.h>
 #include "Adafruit_SI1145.h"
 
