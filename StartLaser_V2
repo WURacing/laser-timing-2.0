@@ -1,0 +1,250 @@
+#include <Wire.h>
+#include "Adafruit_SI1145.h"
+
+//SENSOR
+Adafruit_SI1145 uv = Adafruit_SI1145();
+
+//PINOUT
+const int ResetPin = 3;
+const int StartRacePin = 5;
+const int EndRacePin = 6;
+const int RedLED = 11;
+const int GreenLED = 12;
+
+//UV Constants
+int UV_BACKGROUND = 18;
+int MIN_DELTA_UV = UV_BACKGROUND / 2;
+const int MIN_TIME = 10;
+
+//Timing variables
+unsigned long startTime = 0;
+unsigned long endTime = 0;
+unsigned long firstTrip = 0;
+float lapTime = 0.0;
+boolean wasTripped = false;
+long Times[100];
+int lap = 1;
+
+//Delta Timing:
+unsigned long currentTime = 0;
+unsigned long previousLEDTime = 0;
+const unsigned long deltaTime = 1000;
+int RedLEDState = LOW;
+
+//Debounce Buttons/Timing:s
+int lastStartButtonState = LOW;
+int resetButtonState = 1;
+int lastResetButtonState = LOW;
+unsigned long previousStartTime = 0;
+unsigned long previousResetTime = 0;
+const unsigned long debounceTime = 50;
+
+enum State {
+  Ready,
+  RaceStart,
+  RunningRace,
+  RaceEnd,
+  Reset,
+};
+
+State currState = Ready;
+
+void setup() {
+  Serial.begin(9600);
+
+  //Try to find a sensor, and automatically try to find a sensor every 5 seconds if one is not found.
+  if(!uv.begin()) {
+    Serial.println("Unable to find sensor. Program will automatically try to locate sensor");
+    unsigned long start = millis();
+    while(true) {
+      if(millis() - start >= 5000) {
+        start = millis();
+        if(uv.begin()) {
+          Serial.println("Sensor located. Executing LapTime program");
+          break;
+        }
+        else {
+          Serial.println("No sensor located. Retrying..."); 
+        }
+      }
+    }
+  }
+
+  //Set pin modes
+  pinMode(ResetPin, INPUT_PULLUP);
+  pinMode(StartRacePin, INPUT_PULLUP);
+  pinMode(EndRacePin, INPUT_PULLUP);
+  pinMode(RedLED, OUTPUT);
+  pinMode(GreenLED, OUTPUT);
+
+  int cumSum = 0;
+  for(int i = 0; i <= 5; i++) {
+    cumSum += uv.readUV();
+  }
+  UV_BACKGROUND = cumSum / 6;
+  MIN_DELTA_UV = UV_BACKGROUND / 2;
+
+  Serial.print("UV Background: ");
+  Serial.println(UV_BACKGROUND);
+  Serial.print("Minimum UV Delta: ");
+  Serial.println(MIN_DELTA_UV);
+  
+  //All set up!
+  digitalWrite(GreenLED, HIGH);
+  Serial.println("---------------------");
+  Serial.print("Lap: ");
+  Serial.println(lap);
+  Serial.println();
+}
+
+void loop() {
+  currentTime = millis();
+
+  startLaser(currState);
+}
+
+void startLaser(State s) {
+  switch(s) {
+
+    //Laser is not armed yet: Wait for the START button to be pressed
+    case Ready:
+      StartButtonCheck();
+      break;
+
+    //Laser is armed: check for trip
+    case RaceStart:
+      if(checkForTrip()) {
+        Serial.println("Laser was tripped!");
+        startTime = currentTime;
+        digitalWrite(RedLED, HIGH);
+        RedLEDState = HIGH;
+        previousLEDTime = currentTime;
+        currState = RunningRace;
+      }
+
+      ResetButtonCheck();
+      break;
+    case RunningRace:
+      if(currentTime - previousLEDTime > deltaTime) {
+        RedLEDState = !RedLEDState;
+        digitalWrite(RedLED, RedLEDState);
+        previousLEDTime += deltaTime;
+      }
+
+      if(digitalRead(EndRacePin) == HIGH) {
+        Serial.println("Laser was tripped!");
+        endTime = currentTime;
+        Times[(lap - 1)] = endTime - startTime;
+        lapTime = (float)Times[lap - 1] / 1000.0;
+        int minutes = (int)lapTime % 60;
+        int seconds = ((int)lapTime - 60 * minutes) % 1000;
+        int milli = (int)1000*(lapTime - (int)(lapTime));
+        Serial.println();
+        Serial.print("Lap time: ");
+        Serial.print(minutes);
+        Serial.print(":");
+        if(seconds < 10) {
+          Serial.print("0");
+          Serial.print(seconds);
+        }
+        else {
+          Serial.print(seconds);
+        }
+        Serial.print(".");
+        if(milli < 10) {
+          Serial.print("00");
+          Serial.print(milli);
+        }
+        else if(milli < 100) {
+          Serial.print("0");
+          Serial.print(milli);
+        }
+        else {
+          Serial.print(milli);
+        }
+        Serial.println();
+        digitalWrite(RedLED, LOW);
+        currState = RaceEnd;
+      }
+
+      ResetButtonCheck();
+      break;
+    case RaceEnd:
+      ResetButtonCheck();
+      break;
+    case Reset:
+      previousLEDTime = currentTime;
+      digitalWrite(RedLED, LOW);
+      digitalWrite(GreenLED, HIGH);
+      currState = Ready;
+      break;
+  }
+}
+
+boolean checkForTrip() { //Make sure that the trip is NOT a false positive
+  unsigned long init = millis();
+  if(uv.readUV() <= UV_BACKGROUND - MIN_DELTA_UV) {
+    while(millis() - init < MIN_TIME) {
+      if(uv.readUV() <= UV_BACKGROUND - MIN_DELTA_UV) {
+        //Still detecting 
+      }
+      else {
+        Serial.println("False positive detected");
+        return false; //Object in front of laser for too short of a time, false positive detected. Probable cause: rain
+      }
+    }
+  }
+  return true; //Object in front of laser for adequate time, likely the car.
+}
+
+void StartButtonCheck() {
+// Take a signal reading
+  int startReading = digitalRead(StartRacePin);
+  
+// If the start signal is recieved...
+  if (startReading != lastStartButtonState) {
+//  ...start debounce check
+    previousStartTime = currentTime;
+  }
+
+// If the start debounce check passes...
+  if (currentTime - previousStartTime > debounceTime && !startReading) {
+//  ...notify that the laser is armed
+    Serial.println("Laser is armed!");
+//  ...start the race
+    currState = RaceStart;
+  }
+
+// Record the current reading for the next check
+  lastStartButtonState = startReading;
+}
+
+void ResetButtonCheck() {
+// Take a signal reading
+  int resetReading = digitalRead(ResetPin);
+
+//  If the reset button changes...
+  if (resetReading != lastResetButtonState) {
+//    ...start debounce check
+    previousResetTime = currentTime;
+  }
+
+// If the reset debounce check passes...
+  if (currentTime - previousResetTime > debounceTime && !resetReading) {
+//  ...notify that reset procedure is initiated
+    Serial.println("Resetting...");
+//  ...if the button is pushed down...
+//      ...initiate Reset procedure
+    currState = Reset;
+//  ...change test index
+    lap++;
+//  ...print test number
+    Serial.println("------");
+    Serial.print("Lap: ");
+    Serial.println(lap);
+    Serial.println();
+  }
+
+// Record the current reading for the next check
+  lastResetButtonState = resetReading;
+}
