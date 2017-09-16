@@ -1,0 +1,82 @@
+#include <Wire.h>
+#include "Adafruit_SI1145.h"
+
+//UV Sensor:
+Adafruit_SI1145 uv = Adafruit_SI1145();
+
+int UVLight = 0;
+int visLight = 0;
+const int normalIR = 5000;
+const int normalUV = 10;
+
+//Pin Constants:
+const int SignalOut = 6;
+const int RedLED = 8;
+
+//UV Constants
+int UV_BACKGROUND = 18;
+int MIN_DELTA_UV = UV_BACKGROUND / 2;
+const int MIN_TIME = 10;
+
+unsigned long start;
+
+void setup() {
+  Serial.begin(9600);
+  // Initialize pins
+  pinMode(SignalOut,OUTPUT);
+  pinMode(RedLED,OUTPUT);
+
+// Laser Startup
+  //Try to find a sensor, and automatically try to find a sensor every 5 seconds if one is not found.
+  if(!uv.begin()) {
+    Serial.println("Unable to find sensor. Program will automatically try to locate sensor");
+    start = millis();
+
+    boolean found = false;
+    
+    while(!found) {
+      if(millis() - start >= 5000) {
+        start = millis();
+        if(uv.begin()) {
+          Serial.println("Sensor located. Executing LapTime program");
+          found = true;
+        }
+        else {
+          Serial.println("No sensor located. Retrying..."); 
+        }
+      }
+    }
+  }
+
+  Serial.println("OK");
+}
+
+void loop() {
+// If laser is tripped...
+  if (checkForTrip()) {
+    digitalWrite(SignalOut,HIGH);
+    digitalWrite(RedLED,HIGH);
+  }
+  else {
+    digitalWrite(SignalOut,LOW);
+    digitalWrite(RedLED,LOW);
+  }
+  Serial.println(uv.readUV());
+  
+}
+
+boolean checkForTrip() { //Make sure that the trip is NOT a false positive
+  unsigned long init = millis();
+  if(uv.readUV() <= UV_BACKGROUND - MIN_DELTA_UV) {
+    while(millis() - init < MIN_TIME) {
+      if(uv.readUV() <= UV_BACKGROUND - MIN_DELTA_UV) {
+        //Still detecting 
+      }
+      else {
+        Serial.println("False positive detected");
+        return false; //Object in front of laser for too short of a time, false positive detected. Probable cause: rain
+      }
+    }
+  }
+  return true; //Object in front of laser for adequate time, likely the car.
+}
